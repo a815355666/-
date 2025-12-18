@@ -41,7 +41,6 @@
             
             init: async function() {
                 try {
-                    // 2. 在這裡直接填入您的 Firebase 設定 (原本是讀取外部變數，現在改為直接填入)
                     const firebaseConfig = {
                         apiKey: "AIzaSyB2HeIlJGFx9JIcuGvv9QNDfJJDJR5BaIU",
                         authDomain: "a815355666-cf56b.firebaseapp.com",
@@ -52,20 +51,18 @@
                         measurementId: "G-51TP8K4BQY"
                     };
                     
-                    // 設定存檔路徑使用的 ID，使用 projectId 即可
                     window.appId = firebaseConfig.projectId; 
                     
                     // 初始化 Firebase
                     const app = initializeApp(firebaseConfig);
                     
-                    // 3. 初始化 Analytics (這是您新代碼要求加入的功能)
+                    // 3. 初始化 Analytics
                     const analytics = getAnalytics(app);
 
                     // 綁定到全域變數，讓下方的程式碼可以呼叫
                     window.auth = getAuth(app);
                     window.db = getFirestore(app);
-
-                    // --- 以下邏輯維持原本設計不變 ---
+                    
                     
                     // 監聽 Auth 狀態，確保真正登入成功才開啟功能
                     onAuthStateChanged(window.auth, (user) => {
@@ -96,11 +93,8 @@
                     window.showLoginModal = function() { alert("連線失敗，請檢查網路或重新整理網頁。\n" + e.message); };
                 }
             },
-
-            // ... (下方的 bindButtons, getInputs 等其他函式完全不用動，維持原樣) ...
             
             bindButtons: function() {
-                // 雲端準備好後，替換原本的 alert 函式
                 window.showLoginModal = () => {
                     document.getElementById('login-modal').classList.remove('hidden');
                     // 重置按鈕狀態
@@ -274,7 +268,6 @@
                 }
             },
             
-            // 公開給外部呼叫的 save
             save: function() {
                 if(this.isLoggedIn) this.saveDataToCloud();
             }
@@ -822,7 +815,7 @@
                 if(confirm(`確定要花費 $${item.cost} 兌換「${item.text}」嗎？`)) {
                     window.redemptions.push({ id: Date.now(), itemId: item.id, text: item.text, cost: item.cost, date: new Date().toISOString() });
                     saveData();
-                    alert(`🎉 兌換成功！享受你的 ${item.text} 吧！`);
+                    alert(`兌換成功！享受你的 ${item.text} 吧！`);
                 }
             } else { alert('金幣不足！'); }
         }
@@ -839,8 +832,6 @@ function switchTab(tab) {
             tabs[tab].classList.add('active');
 
             if (tab === 'daily') {
-                // 修改說明：這裡原本有一行 selectedDate = getTaipeiDateString(); 把它刪掉了
-                // 這樣切換過來時，會保留你在月曆上點選的那個日期
                 renderTaskList();
             } else if (tab === 'monthly') {
                 const [y, m] = selectedDate.split('-');
@@ -851,7 +842,7 @@ function switchTab(tab) {
         }
 
         document.getElementById('tab-daily').onclick = function() {
-            // 如果是手動點擊上方的標籤，我們才強制回到「今天」
+            // 如果是手動點擊上方的標籤，才強制回到「今天」
             selectedDate = getTaipeiDateString(); 
             switchTab('daily'); 
         };
@@ -864,3 +855,4 @@ function switchTab(tab) {
     </script>
 </body>
 </html>
+
