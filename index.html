@@ -19,10 +19,12 @@
     </script>
 
     <!-- Firebase SDKs -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+<script type="module">
+        // 1. 這裡更新為 12.7.0 版本，並加入 getAnalytics
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
+        import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-analytics.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 
         // 全域變數初始化
         window.db = null;
@@ -39,19 +41,32 @@
             
             init: async function() {
                 try {
-                    const firebaseConfig = JSON.parse(window.__firebase_config || '{}');
-                    window.appId = window.__app_id || 'default-app';
+                    // 2. 在這裡直接填入您的 Firebase 設定 (原本是讀取外部變數，現在改為直接填入)
+                    const firebaseConfig = {
+                        apiKey: "AIzaSyB2HeIlJGFx9JIcuGvv9QNDfJJDJR5BaIU",
+                        authDomain: "a815355666-cf56b.firebaseapp.com",
+                        projectId: "a815355666-cf56b",
+                        storageBucket: "a815355666-cf56b.firebasestorage.app",
+                        messagingSenderId: "16313919572",
+                        appId: "1:16313919572:web:2ffceaea9952b1d309e5c1",
+                        measurementId: "G-51TP8K4BQY"
+                    };
                     
-                    if (!firebaseConfig.apiKey) {
-                        console.warn("無 Firebase 設定");
-                        window.showLoginModal = function() { alert("目前環境無法連接雲端，僅支援本地模式。"); };
-                        return;
-                    }
-
+                    // 設定存檔路徑使用的 ID，使用 projectId 即可
+                    window.appId = firebaseConfig.projectId; 
+                    
+                    // 初始化 Firebase
                     const app = initializeApp(firebaseConfig);
+                    
+                    // 3. 初始化 Analytics (這是您新代碼要求加入的功能)
+                    const analytics = getAnalytics(app);
+
+                    // 綁定到全域變數，讓下方的程式碼可以呼叫
                     window.auth = getAuth(app);
                     window.db = getFirestore(app);
 
+                    // --- 以下邏輯維持原本設計不變 ---
+                    
                     // 監聽 Auth 狀態，確保真正登入成功才開啟功能
                     onAuthStateChanged(window.auth, (user) => {
                         if (user) {
@@ -78,10 +93,12 @@
 
                 } catch (e) {
                     console.error("Init Error:", e);
-                    window.showLoginModal = function() { alert("連線失敗，請檢查網路或重新整理網頁。"); };
+                    window.showLoginModal = function() { alert("連線失敗，請檢查網路或重新整理網頁。\n" + e.message); };
                 }
             },
 
+            // ... (下方的 bindButtons, getInputs 等其他函式完全不用動，維持原樣) ...
+            
             bindButtons: function() {
                 // 雲端準備好後，替換原本的 alert 函式
                 window.showLoginModal = () => {
