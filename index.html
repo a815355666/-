@@ -827,7 +827,7 @@
             } else { alert('金幣不足！'); }
         }
 
-        function switchTab(tab) {
+function switchTab(tab) {
             currentView = tab;
             const views = { 'daily': document.getElementById('view-list'), 'monthly': document.getElementById('view-calendar'), 'shop': document.getElementById('view-shop') };
             const tabs = { 'daily': document.getElementById('tab-daily'), 'monthly': document.getElementById('tab-monthly'), 'shop': document.getElementById('tab-shop') };
@@ -839,7 +839,8 @@
             tabs[tab].classList.add('active');
 
             if (tab === 'daily') {
-                selectedDate = getTaipeiDateString(); // Reset to today when clicking tab if needed, but keeping old logic of saving state is fine. Actually user requested logic.
+                // 修改說明：這裡原本有一行 selectedDate = getTaipeiDateString(); 把它刪掉了
+                // 這樣切換過來時，會保留你在月曆上點選的那個日期
                 renderTaskList();
             } else if (tab === 'monthly') {
                 const [y, m] = selectedDate.split('-');
@@ -850,7 +851,9 @@
         }
 
         document.getElementById('tab-daily').onclick = function() {
-            if(currentView === 'daily') { selectedDate = getTaipeiDateString(); renderTaskList(); } else { switchTab('daily'); }
+            // 如果是手動點擊上方的標籤，我們才強制回到「今天」
+            selectedDate = getTaipeiDateString(); 
+            switchTab('daily'); 
         };
         function backToToday() { selectedDate = getTaipeiDateString(); renderTaskList(); }
 
