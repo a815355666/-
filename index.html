@@ -7,9 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
-    <!-- 預備腳本：確保按鈕在模組載入前被點擊時有反應 -->
     <script>
-        // 定義簡單的提示函式，避免 undefined 錯誤
         function notReadyAlert() { alert("系統正在連線雲端資料庫，請稍候約 3 秒再試..."); }
         window.showLoginModal = notReadyAlert;
         window.closeLoginModal = function() { document.getElementById('login-modal').classList.add('hidden'); };
@@ -18,13 +16,11 @@
         window.handleLogout = function() {};
     </script>
 
-    <!-- Firebase SDKs -->
-<script type="module">
-        // 1. 這裡更新為 12.7.0 版本，並加入 getAnalytics
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
-        import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-analytics.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
-        import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
+        import { getAnalytics } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-analytics.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
 
         // 全域變數初始化
         window.db = null;
@@ -55,17 +51,13 @@
                     
                     // 初始化 Firebase
                     const app = initializeApp(firebaseConfig);
-                    
-                    // 3. 初始化 Analytics
                     const analytics = getAnalytics(app);
 
-                    // 綁定到全域變數，讓下方的程式碼可以呼叫
                     window.auth = getAuth(app);
                     window.db = getFirestore(app);
                     
-                    
-                    // 監聽 Auth 狀態，確保真正登入成功才開啟功能
-                    onAuthStateChanged(window.auth, (user) => {
+                    // 監聽 Auth 狀態
+                    onAuthStateChanged(window.auth, async (user) => {
                         if (user) {
                             window.userUid = user.uid;
                             window.firestoreReady = true;
@@ -81,10 +73,8 @@
                         }
                     });
 
-                    // 觸發登入
-                    if (window.__initial_auth_token) {
-                        await signInWithCustomToken(window.auth, window.__initial_auth_token);
-                    } else {
+                    // 匿名登入
+                    if (!window.auth.currentUser) {
                         await signInAnonymously(window.auth);
                     }
 
@@ -97,7 +87,6 @@
             bindButtons: function() {
                 window.showLoginModal = () => {
                     document.getElementById('login-modal').classList.remove('hidden');
-                    // 重置按鈕狀態
                     this.resetBtnStates();
                 };
 
@@ -132,11 +121,8 @@
             resetBtnStates: function() {
                 const btnLogin = document.getElementById('btn-login-action');
                 const btnReg = document.getElementById('btn-register-action');
-                if(btnLogin) btnLogin.innerHTML = '登入';
-                if(btnReg) btnReg.innerHTML = '註冊新帳號';
-                // 解鎖按鈕
-                if(btnLogin) btnLogin.disabled = false;
-                if(btnReg) btnReg.disabled = false;
+                if(btnLogin) { btnLogin.innerHTML = '登入'; btnLogin.disabled = false; }
+                if(btnReg) { btnReg.innerHTML = '註冊新帳號'; btnReg.disabled = false; }
             },
 
             setLoading: function(isLogin) {
@@ -147,12 +133,10 @@
                 }
             },
 
-            // 產生唯一 ID
             generateId: function(user, pass) {
                 return `user_${user}_${pass}`.replace(/[^a-zA-Z0-9_]/g, '');
             },
 
-            // --- 登入邏輯 ---
             performLogin: async function(user, pass, isAuto = false) {
                 if (!window.firestoreReady) { if(!isAuto) alert("連線中..."); return; }
                 if(!isAuto) this.setLoading(true);
@@ -186,10 +170,9 @@
                 }
             },
 
-            // --- 註冊邏輯 ---
             performRegister: async function(user, pass) {
                 if (!window.firestoreReady) { alert("連線中..."); return; }
-                this.setLoading(false); // Register loading
+                this.setLoading(false);
 
                 const docId = this.generateId(user, pass);
                 
@@ -201,9 +184,7 @@
                         alert("這個帳號密碼組合已經被註冊過了！\n請直接點擊「登入」按鈕。");
                         this.resetBtnStates();
                     } else {
-                        // 建立新資料
-                        await this.saveDataToCloud(docId, user, true); // true = force save current data
-                        
+                        await this.saveDataToCloud(docId, user, true); 
                         this.loginSuccess(user, pass, docId);
                         alert("註冊成功！已將目前的計畫表上傳。");
                         window.closeLoginModal();
@@ -226,6 +207,7 @@
                 document.getElementById('user-status').classList.remove('hidden');
                 document.getElementById('display-username').textContent = user;
                 document.getElementById('cloud-indicator').classList.remove('hidden');
+                this.saveDataToCloud();
             },
 
             logout: function() {
@@ -258,7 +240,6 @@
                 const userDocRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'reward_users', docIdToUse);
                 await setDoc(userDocRef, dataToSave);
                 
-                // UI Feedback
                 if(!isNew) {
                     const indicator = document.getElementById('save-indicator');
                     if(indicator) {
@@ -273,7 +254,6 @@
             }
         };
 
-        // 啟動 CloudManager
         window.CloudManager.init();
     </script>
 
@@ -308,13 +288,11 @@
 
     <div class="w-full max-w-md bg-white rounded-2xl md:rounded-3xl shadow-xl overflow-hidden flex flex-col h-[calc(100dvh-1rem)] md:h-auto md:min-h-[750px] relative">
         
-        <!-- Header & Tabs -->
         <div class="bg-indigo-600 p-4 md:p-6 pb-2 text-white flex flex-col shadow-md z-10 shrink-0">
-            <!-- Top Bar -->
             <div class="flex justify-between items-center mb-2">
                 <div class="flex items-center gap-2">
                     <span class="text-[10px] bg-white/20 px-2 py-0.5 rounded-full flex items-center gap-1 hidden" id="cloud-indicator">
-                        <i class="fas fa-cloud text-sky-300"></i> 雲端同步中
+                        <i class="fas fa-cloud text-sky-300"></i> 雲端同步
                     </span>
                     <span id="save-indicator" class="text-[10px] text-green-300 transition-opacity duration-500 opacity-0 font-bold">
                         <i class="fas fa-check"></i> 已儲存
@@ -353,17 +331,14 @@
                 </div>
             </div>
 
-            <!-- Tabs -->
             <div class="flex gap-2 mt-1">
-                <button onclick="switchTab('daily')" id="tab-daily" class="tab-btn active pb-2 flex-1 text-center text-sm">今日計畫</button>
+                <button onclick="clickDailyTab()" id="tab-daily" class="tab-btn active pb-2 flex-1 text-center text-sm">今日計畫</button>
                 <button onclick="switchTab('monthly')" id="tab-monthly" class="tab-btn pb-2 flex-1 text-center text-sm">每月計畫</button>
                 <button onclick="switchTab('shop')" id="tab-shop" class="tab-btn pb-2 flex-1 text-center text-sm">兌換商店</button>
             </div>
         </div>
 
-        <!-- Main Content -->
         <div class="flex-1 overflow-hidden relative bg-gray-50">
-            <!-- VIEW: Daily -->
             <div id="view-list" class="view-container absolute inset-0 flex flex-col bg-gray-50 z-10">
                 <div id="holiday-alert-banner" class="hidden bg-red-100 text-red-600 px-4 py-2 text-sm font-bold text-center flex items-center justify-center gap-2 shrink-0 border-b border-red-200">
                     <i class="fas fa-gift"></i> <span id="holiday-name"></span>
@@ -388,7 +363,6 @@
                 </div>
             </div>
 
-            <!-- VIEW: Calendar -->
             <div id="view-calendar" class="view-container absolute inset-0 flex flex-col bg-white transform translate-x-full overflow-y-auto z-20">
                 <div class="flex justify-between items-center p-4 shrink-0">
                     <button onclick="changeMonth(-1)" class="w-8 h-8 rounded-full hover:bg-gray-100 text-gray-600"><i class="fas fa-chevron-left"></i></button>
@@ -409,10 +383,12 @@
                 </div>
             </div>
 
-            <!-- VIEW: Shop -->
             <div id="view-shop" class="view-container absolute inset-0 flex flex-col bg-gray-50 transform translate-x-full z-20 overflow-hidden">
                 <div class="p-3 md:p-4 bg-white border-b border-gray-100 shadow-sm z-10 shrink-0">
-                    <h2 class="text-sm font-bold text-gray-500 mb-2">新增自訂獎勵</h2>
+                    <h2 id="shop-stats-header" class="text-sm font-bold text-gray-500 mb-2 flex justify-between items-center">
+                        <span>已達成計畫數量</span>
+                        <span id="completed-count-display" class="text-indigo-600 text-lg">0</span>
+                    </h2>
                     <div class="flex gap-2 mb-2">
                         <input type="text" id="shop-item-input" class="flex-[2] bg-gray-50 border border-gray-200 text-gray-900 rounded-lg md:rounded-xl focus:ring-2 focus:ring-purple-500 outline-none p-2 md:p-3 text-sm md:text-base" placeholder="來去買淘寶">
                         <input type="number" id="shop-cost-input" class="w-20 md:flex-[1] bg-gray-50 border border-gray-200 text-gray-900 rounded-lg md:rounded-xl focus:ring-2 focus:ring-purple-500 outline-none p-2 md:p-3 text-center text-sm md:text-base" placeholder="$">
@@ -431,7 +407,6 @@
         </div>
     </div>
 
-    <!-- Improved Login Modal -->
     <div id="login-modal" class="hidden fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-scaleIn">
             <div class="bg-indigo-600 p-4 text-white text-center relative">
@@ -451,7 +426,6 @@
                     <input type="password" id="login-pass" class="w-full bg-gray-50 border border-gray-300 rounded-lg p-3 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 transition" placeholder="輸入您的密碼">
                 </div>
                 
-                <!-- Separated Buttons -->
                 <div class="flex flex-col gap-3 mt-4">
                     <button onclick="handleLoginAction()" id="btn-login-action" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl shadow-lg active:scale-95 transition">
                         登入
@@ -467,6 +441,37 @@
                 </div>
                 <div class="text-[10px] text-center text-gray-400">
                     註冊後，目前的本地資料將會上傳至雲端。
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="edit-modal" class="hidden fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-scaleIn">
+            <div class="bg-indigo-600 p-4 text-white flex justify-between items-center">
+                <h3 class="text-lg font-bold"><i class="fas fa-edit"></i> 修改計畫</h3>
+                <button onclick="closeEditModal()" class="text-white/70 hover:text-white">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="p-6 space-y-4">
+                <input type="hidden" id="edit-task-id">
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 mb-1">計畫內容</label>
+                    <input type="text" id="edit-task-text" class="w-full bg-gray-50 border border-gray-300 rounded-lg p-3 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 transition">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 mb-1">獎勵金額 ($)</label>
+                    <input type="number" id="edit-task-reward" class="w-full bg-gray-50 border border-gray-300 rounded-lg p-3 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 transition">
+                </div>
+                
+                <div class="flex gap-3 mt-4">
+                    <button onclick="closeEditModal()" class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-600 font-bold py-3 rounded-xl transition">
+                        取消
+                    </button>
+                    <button onclick="saveEditTask()" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl shadow-lg active:scale-95 transition">
+                        儲存修改
+                    </button>
                 </div>
             </div>
         </div>
@@ -649,6 +654,11 @@
                             <div class="text-gray-800 font-medium truncate text-sm md:text-base">${escapeHtml(task.text)}</div>
                             ${task.reward > 0 ? `<div class="text-xs text-yellow-600 font-bold mt-0.5"><i class="fas fa-coins"></i> 獎勵 $${task.reward}</div>` : ''}
                         </div>
+                        
+                        <button onclick="openEditModal(${task.id})" class="w-8 h-8 flex items-center justify-center text-gray-300 hover:text-indigo-500 transition rounded-full hover:bg-indigo-50 shrink-0">
+                            <i class="fas fa-pen"></i>
+                        </button>
+                        
                         <button onclick="deleteTask(${task.id})" class="w-8 h-8 flex items-center justify-center text-gray-300 hover:text-red-500 transition rounded-full hover:bg-red-50 shrink-0"><i class="fas fa-trash-alt"></i></button>
                     `;
                     listEl.appendChild(li);
@@ -756,6 +766,12 @@
             const historyEl = document.getElementById('redemption-history');
             const balance = calculateBalance();
 
+            const completedCount = window.tasks.filter(t => t.completed).length;
+            const headerCountDisplay = document.getElementById('completed-count-display');
+            if (headerCountDisplay) {
+                headerCountDisplay.textContent = completedCount;
+            }
+
             shopListEl.innerHTML = '';
             if(window.shopItems.length === 0) {
                 shopListEl.innerHTML = '<div class="text-center text-gray-400 py-4">還沒有獎勵商品，新增一個吧！</div>';
@@ -795,6 +811,7 @@
             }
         }
 
+        // 把這些函式移到 renderShop 外面，變成全域函式，這樣 HTML onclick 才能呼叫到
         function addShopItem() {
             const input = document.getElementById('shop-item-input');
             const costInput = document.getElementById('shop-cost-input');
@@ -820,7 +837,7 @@
             } else { alert('金幣不足！'); }
         }
 
-function switchTab(tab) {
+        function switchTab(tab) {
             currentView = tab;
             const views = { 'daily': document.getElementById('view-list'), 'monthly': document.getElementById('view-calendar'), 'shop': document.getElementById('view-shop') };
             const tabs = { 'daily': document.getElementById('tab-daily'), 'monthly': document.getElementById('tab-monthly'), 'shop': document.getElementById('tab-shop') };
@@ -841,12 +858,57 @@ function switchTab(tab) {
             saveData(); 
         }
 
-        document.getElementById('tab-daily').onclick = function() {
-            // 如果是手動點擊上方的標籤，才強制回到「今天」
+        // 獨立出「點擊每日計畫」的行為
+        function clickDailyTab() {
             selectedDate = getTaipeiDateString(); 
-            switchTab('daily'); 
-        };
+            switchTab('daily');
+        }
+
         function backToToday() { selectedDate = getTaipeiDateString(); renderTaskList(); }
+
+        // --- 新增：編輯功能相關函式 ---
+        
+        function openEditModal(id) {
+            const task = window.tasks.find(t => t.id === id);
+            if (!task) return;
+
+            // 把資料填入輸入框
+            document.getElementById('edit-task-id').value = task.id;
+            document.getElementById('edit-task-text').value = task.text;
+            document.getElementById('edit-task-reward').value = task.reward;
+
+            // 顯示視窗
+            document.getElementById('edit-modal').classList.remove('hidden');
+        }
+
+        function closeEditModal() {
+            document.getElementById('edit-modal').classList.add('hidden');
+        }
+
+        function saveEditTask() {
+            const id = parseFloat(document.getElementById('edit-task-id').value);
+            const newText = document.getElementById('edit-task-text').value.trim();
+            const newReward = parseInt(document.getElementById('edit-task-reward').value) || 0;
+
+            if (!newText) {
+                alert('計畫內容不能為空！');
+                return;
+            }
+
+            // 更新陣列中的資料
+            const taskIndex = window.tasks.findIndex(t => t.id === id);
+            if (taskIndex !== -1) {
+                window.tasks[taskIndex].text = newText;
+                window.tasks[taskIndex].reward = newReward;
+                
+                saveData(); // 儲存並同步雲端
+                closeEditModal();
+                alert('修改成功！');
+            } else {
+                alert('找不到該計畫，可能已被刪除。');
+                closeEditModal();
+            }
+        }
 
         updateHeader();
         renderTaskList();
@@ -855,4 +917,3 @@ function switchTab(tab) {
     </script>
 </body>
 </html>
-
