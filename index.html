@@ -317,7 +317,7 @@
 
             <div class="flex justify-between items-start mb-3">
                 <div>
-                    <h1 class="text-xs md:text-sm opacity-80 font-medium">獎勵計畫表</h1>
+                   <h1 id="header-clock" class="text-xs md:text-sm opacity-80 font-medium font-mono">載入中...</h1>
                     <div class="flex items-baseline gap-2">
                         <div id="header-date" class="text-xl md:text-2xl font-bold tracking-wide">載入中...</div>
                         <div id="header-holiday" class="text-xs bg-red-500 text-white px-2 py-0.5 rounded-full hidden"></div>
@@ -333,7 +333,7 @@
 
             <div class="flex gap-2 mt-1">
                 <button onclick="clickDailyTab()" id="tab-daily" class="tab-btn active pb-2 flex-1 text-center text-sm">今日計畫</button>
-                <button onclick="switchTab('monthly')" id="tab-monthly" class="tab-btn pb-2 flex-1 text-center text-sm">每月計畫</button>
+                <button onclick="switchTab('monthly')" id="tab-monthly" class="tab-btn pb-2 flex-1 text-center text-sm">我的日曆</button>
                 <button onclick="switchTab('shop')" id="tab-shop" class="tab-btn pb-2 flex-1 text-center text-sm">兌換商店</button>
             </div>
         </div>
@@ -914,6 +914,27 @@
         renderTaskList();
         setInterval(updateHeader, 60000);
 
+// --- 新增：即時時鐘功能 ---
+        function updateRealTimeClock() {
+            const now = new Date();
+            // 取得台北時間
+            const timeStr = now.toLocaleTimeString('zh-TW', {
+                timeZone: 'Asia/Taipei',
+                hour12: false, // 使用 24 小時制 (若要 12 小時制改成 true)
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+            
+            const clockEl = document.getElementById('header-clock');
+            if (clockEl) {
+                clockEl.innerHTML = timeStr;
+            }
+        }
+
+        // 啟動時鐘，每秒更新 (1000 毫秒)
+        setInterval(updateRealTimeClock, 1000);
+        updateRealTimeClock(); // 初始化時馬上執行一次
     </script>
 </body>
 </html>
