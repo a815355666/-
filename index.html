@@ -2,939 +2,239 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>我的獎勵計畫表 (雲端版)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>我的記帳本</title>
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    
-    <script>
-        function notReadyAlert() { alert("系統正在連線雲端資料庫，請稍候約 3 秒再試..."); }
-        window.showLoginModal = notReadyAlert;
-        window.closeLoginModal = function() { document.getElementById('login-modal').classList.add('hidden'); };
-        window.handleLoginAction = notReadyAlert;
-        window.handleRegisterAction = notReadyAlert;
-        window.handleLogout = function() {};
-    </script>
-
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
-        import { getAnalytics } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-analytics.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
-        import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
-
-        // 全域變數初始化
-        window.db = null;
-        window.auth = null;
-        window.appId = null;
-        window.firestoreReady = false;
-        window.userUid = null;
-        
-        // 簡易的 Cloud Manager
-        window.CloudManager = {
-            docId: null,
-            isLoggedIn: false,
-            username: null,
-            
-            init: async function() {
-                try {
-                    const firebaseConfig = {
-                        apiKey: "AIzaSyB2HeIlJGFx9JIcuGvv9QNDfJJDJR5BaIU",
-                        authDomain: "a815355666-cf56b.firebaseapp.com",
-                        projectId: "a815355666-cf56b",
-                        storageBucket: "a815355666-cf56b.firebasestorage.app",
-                        messagingSenderId: "16313919572",
-                        appId: "1:16313919572:web:2ffceaea9952b1d309e5c1",
-                        measurementId: "G-51TP8K4BQY"
-                    };
-                    
-                    window.appId = firebaseConfig.projectId; 
-                    
-                    // 初始化 Firebase
-                    const app = initializeApp(firebaseConfig);
-                    const analytics = getAnalytics(app);
-
-                    window.auth = getAuth(app);
-                    window.db = getFirestore(app);
-                    
-                    // 監聽 Auth 狀態
-                    onAuthStateChanged(window.auth, async (user) => {
-                        if (user) {
-                            window.userUid = user.uid;
-                            window.firestoreReady = true;
-                            console.log("Firebase Auth Ready:", user.uid);
-                            this.bindButtons(); // 綁定按鈕功能
-                            
-                            // 自動登入檢查
-                            const savedUser = localStorage.getItem('cloud_user');
-                            const savedPass = localStorage.getItem('cloud_pass');
-                            if(savedUser && savedPass && !this.isLoggedIn) {
-                                this.performLogin(savedUser, savedPass, true);
-                            }
-                        }
-                    });
-
-                    // 匿名登入
-                    if (!window.auth.currentUser) {
-                        await signInAnonymously(window.auth);
-                    }
-
-                } catch (e) {
-                    console.error("Init Error:", e);
-                    window.showLoginModal = function() { alert("連線失敗，請檢查網路或重新整理網頁。\n" + e.message); };
-                }
-            },
-            
-            bindButtons: function() {
-                window.showLoginModal = () => {
-                    document.getElementById('login-modal').classList.remove('hidden');
-                    this.resetBtnStates();
-                };
-
-                window.closeLoginModal = () => {
-                    document.getElementById('login-modal').classList.add('hidden');
-                };
-
-                window.handleLoginAction = () => {
-                    const {u, p} = this.getInputs();
-                    if(!u || !p) return;
-                    this.performLogin(u, p, false);
-                };
-
-                window.handleRegisterAction = () => {
-                    const {u, p} = this.getInputs();
-                    if(!u || !p) return;
-                    this.performRegister(u, p);
-                };
-
-                window.handleLogout = () => {
-                    if(confirm('確定要登出嗎？')) this.logout();
-                };
-            },
-
-            getInputs: function() {
-                const u = document.getElementById('login-user').value.trim();
-                const p = document.getElementById('login-pass').value.trim();
-                if(!u || !p) { alert('請輸入帳號與密碼'); return {u:null, p:null}; }
-                return {u, p};
-            },
-
-            resetBtnStates: function() {
-                const btnLogin = document.getElementById('btn-login-action');
-                const btnReg = document.getElementById('btn-register-action');
-                if(btnLogin) { btnLogin.innerHTML = '登入'; btnLogin.disabled = false; }
-                if(btnReg) { btnReg.innerHTML = '註冊新帳號'; btnReg.disabled = false; }
-            },
-
-            setLoading: function(isLogin) {
-                const btn = isLogin ? document.getElementById('btn-login-action') : document.getElementById('btn-register-action');
-                if(btn) {
-                    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 處理中...';
-                    btn.disabled = true;
-                }
-            },
-
-            generateId: function(user, pass) {
-                return `user_${user}_${pass}`.replace(/[^a-zA-Z0-9_]/g, '');
-            },
-
-            performLogin: async function(user, pass, isAuto = false) {
-                if (!window.firestoreReady) { if(!isAuto) alert("連線中..."); return; }
-                if(!isAuto) this.setLoading(true);
-
-                const docId = this.generateId(user, pass);
-                
-                try {
-                    const userDocRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'reward_users', docId);
-                    const docSnap = await getDoc(userDocRef);
-
-                    if (docSnap.exists()) {
-                        const data = docSnap.data();
-                        window.importCloudData(data);
-                        this.loginSuccess(user, pass, docId);
-                        if(!isAuto) {
-                            alert("登入成功！");
-                            window.closeLoginModal();
-                        }
-                    } else {
-                        if(!isAuto) {
-                            alert("找不到此帳號或密碼錯誤。\n如果您是第一次使用，請點擊「註冊新帳號」。");
-                            this.resetBtnStates();
-                        }
-                    }
-                } catch (error) {
-                    console.error("Login Error:", error);
-                    if(!isAuto) {
-                        alert("發生錯誤：" + error.message);
-                        this.resetBtnStates();
-                    }
-                }
-            },
-
-            performRegister: async function(user, pass) {
-                if (!window.firestoreReady) { alert("連線中..."); return; }
-                this.setLoading(false);
-
-                const docId = this.generateId(user, pass);
-                
-                try {
-                    const userDocRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'reward_users', docId);
-                    const docSnap = await getDoc(userDocRef);
-
-                    if (docSnap.exists()) {
-                        alert("這個帳號密碼組合已經被註冊過了！\n請直接點擊「登入」按鈕。");
-                        this.resetBtnStates();
-                    } else {
-                        await this.saveDataToCloud(docId, user, true); 
-                        this.loginSuccess(user, pass, docId);
-                        alert("註冊成功！已將目前的計畫表上傳。");
-                        window.closeLoginModal();
-                    }
-                } catch (error) {
-                    console.error("Register Error:", error);
-                    alert("註冊失敗：" + error.message);
-                    this.resetBtnStates();
-                }
-            },
-
-            loginSuccess: function(user, pass, docId) {
-                this.isLoggedIn = true;
-                this.docId = docId;
-                this.username = user;
-                localStorage.setItem('cloud_user', user);
-                localStorage.setItem('cloud_pass', pass);
-
-                document.getElementById('auth-section-login-btn').classList.add('hidden');
-                document.getElementById('user-status').classList.remove('hidden');
-                document.getElementById('display-username').textContent = user;
-                document.getElementById('cloud-indicator').classList.remove('hidden');
-                this.saveDataToCloud();
-            },
-
-            logout: function() {
-                this.isLoggedIn = false;
-                this.docId = null;
-                this.username = null;
-                localStorage.removeItem('cloud_user');
-                localStorage.removeItem('cloud_pass');
-                
-                document.getElementById('user-status').classList.add('hidden');
-                document.getElementById('auth-section-login-btn').classList.remove('hidden');
-                document.getElementById('cloud-indicator').classList.add('hidden');
-                alert("已登出");
-            },
-
-            saveDataToCloud: async function(targetDocId, targetUsername, isNew = false) {
-                const docIdToUse = targetDocId || this.docId;
-                const userToUse = targetUsername || this.username;
-                
-                if (!docIdToUse || !window.firestoreReady) return;
-
-                const dataToSave = {
-                    tasks: window.tasks,
-                    shopItems: window.shopItems,
-                    redemptions: window.redemptions,
-                    lastUpdated: new Date().toISOString(),
-                    owner: userToUse
-                };
-
-                const userDocRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'reward_users', docIdToUse);
-                await setDoc(userDocRef, dataToSave);
-                
-                if(!isNew) {
-                    const indicator = document.getElementById('save-indicator');
-                    if(indicator) {
-                        indicator.classList.remove('opacity-0');
-                        setTimeout(() => indicator.classList.add('opacity-0'), 2000);
-                    }
-                }
-            },
-            
-            save: function() {
-                if(this.isLoggedIn) this.saveDataToCloud();
-            }
-        };
-
-        window.CloudManager.init();
-    </script>
+    <!-- Google Fonts: Noto Sans TC -->
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
 
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap');
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            background-color: #EFEBE9; /* 淺灰褐背景，模擬桌面底色 */
+        }
         
-        body { font-family: 'Noto Sans TC', sans-serif; background-color: #f0fdfa; }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-        .task-checkbox:checked + div { text-decoration: line-through; color: #9ca3af; }
-        
-        /* Calendar Styles */
-        .calendar-day { aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding-top: 4px; border-radius: 8px; cursor: pointer; transition: all 0.2s; font-size: 0.9rem; position: relative; }
-        .calendar-day:hover { background-color: #e0e7ff; }
-        .calendar-day.active { background-color: #4f46e5; color: white; }
-        .calendar-day.today { border: 2px solid #4f46e5; font-weight: bold; }
-        .calendar-day.has-task::after { content: ''; width: 4px; height: 4px; background-color: #ec4899; border-radius: 50%; margin-top: 2px; }
-        .calendar-day.active.has-task::after { background-color: white; }
-        .calendar-day.is-holiday::before { content: ''; position: absolute; top: 4px; right: 4px; width: 4px; height: 4px; background-color: #ef4444; border-radius: 50%; }
-        .calendar-day.active.is-holiday::before { background-color: #fca5a5; }
+        /* 隱藏捲軸但保持功能 (Chrome/Safari/Webkit) */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;  /* IE and Edge */
+            scrollbar-width: none;  /* Firefox */
+        }
 
-        .tab-btn { transition: all 0.3s; border-bottom: 3px solid transparent; opacity: 0.6; }
-        .tab-btn.active { border-bottom-color: white; opacity: 1; font-weight: bold; }
-        .view-container { transition: transform 0.3s ease-in-out, opacity 0.3s; }
-        
-        /* Animation for Modal */
-        @keyframes scaleIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-        .animate-scaleIn { animation: scaleIn 0.2s ease-out; }
+        /* 自定義顏色變數 (模擬設計稿的紅棕/藕粉色系) */
+        .bg-primary-dark { background-color: #4E342E; } /* 深咖啡色 Header */
+        .bg-primary-light { background-color: #8D6E63; } /* 次深咖啡 Icon背景 */
+        .text-primary-dark { color: #3E2723; }
+        .bg-accent-pink { background-color: #D7CCC8; } /* 藕粉色金額底 */
+        .bg-accent-income { background-color: #C8E6C9; } /* 收入金額底 (淺綠) */
     </style>
 </head>
-<body class="flex flex-col items-center justify-center min-h-[100dvh] text-gray-800 p-2 md:p-4 box-border">
+<body class="flex items-center justify-center min-h-screen">
 
-    <div class="w-full max-w-md bg-white rounded-2xl md:rounded-3xl shadow-xl overflow-hidden flex flex-col h-[calc(100dvh-1rem)] md:h-auto md:min-h-[750px] relative">
+    <!-- 手機容器 (Mobile Container) -->
+    <div class="relative w-full max-w-md h-[100vh] bg-[#F5F5F5] shadow-2xl overflow-hidden flex flex-col">
         
-        <div class="bg-indigo-600 p-4 md:p-6 pb-2 text-white flex flex-col shadow-md z-10 shrink-0">
-            <div class="flex justify-between items-center mb-2">
-                <div class="flex items-center gap-2">
-                    <span class="text-[10px] bg-white/20 px-2 py-0.5 rounded-full flex items-center gap-1 hidden" id="cloud-indicator">
-                        <i class="fas fa-cloud text-sky-300"></i> 雲端同步
-                    </span>
-                    <span id="save-indicator" class="text-[10px] text-green-300 transition-opacity duration-500 opacity-0 font-bold">
-                        <i class="fas fa-check"></i> 已儲存
-                    </span>
+        <!-- Header 區域 -->
+        <!-- 稍微加高一點，讓卡片可以蓋上來 -->
+        <header class="bg-primary-dark h-48 px-6 pt-10 pb-6 flex justify-between items-start shrink-0 relative z-0">
+            <!-- 左側：月份標題 (我幫你補上的，讓畫面平衡一點) -->
+            <div class="text-white">
+                <p class="text-xs opacity-80 mb-1">本月概況</p>
+                <div class="flex items-center gap-2 cursor-pointer">
+                    <h1 class="text-2xl font-bold tracking-wide">2026年 1月</h1>
+                    <i class="fa-solid fa-chevron-down text-sm opacity-70"></i>
                 </div>
+            </div>
+
+            <!-- 右側：登入按鈕 -->
+            <button class="flex items-center gap-2 bg-white/10 hover:bg-white/20 backdrop-blur-sm border border-white/30 text-white text-sm px-4 py-1.5 rounded-full transition-all">
+                <i class="fa-regular fa-user"></i>
+                <span>帳號登入</span>
+            </button>
+        </header>
+
+        <!-- 主要內容區 (白色卡片) -->
+        <!-- 使用負 margin-top 把它往上拉，蓋住 Header -->
+        <main class="flex-1 bg-white -mt-10 rounded-t-[30px] relative z-10 flex flex-col shadow-inner overflow-hidden">
+            
+            <!-- 裝飾用：頂部的小拉條 (常見於 iOS sheet) -->
+            <div class="w-full flex justify-center pt-3 pb-1">
+                <div class="w-12 h-1.5 bg-gray-200 rounded-full"></div>
+            </div>
+
+            <!-- 交易列表 (可捲動區域) -->
+            <div class="flex-1 overflow-y-auto no-scrollbar px-6 pt-2 pb-24 space-y-5" id="transaction-list">
+                <!-- 列表內容會由 JS 生成，這裡先放幾個範例模擬你的設計稿 -->
                 
-                <div id="auth-section">
-                    <div id="auth-section-login-btn">
-                        <button onclick="showLoginModal()" class="text-xs bg-indigo-700 hover:bg-indigo-800 px-3 py-1 rounded-full transition border border-indigo-500 shadow-sm">
-                            <i class="fas fa-user-circle"></i> 登入 / 註冊
-                        </button>
+                <!-- 範例 1: 服飾 -->
+                <div class="flex items-center justify-between group cursor-pointer">
+                    <div class="flex items-center gap-4">
+                        <!-- Icon 區塊 -->
+                        <div class="w-12 h-12 bg-[#8D6E63] rounded-xl flex items-center justify-center text-white shadow-sm group-hover:scale-105 transition-transform">
+                            <i class="fa-solid fa-shirt text-xl"></i>
+                        </div>
+                        <!-- 文字資訊 -->
+                        <div class="flex flex-col">
+                            <span class="text-primary-dark font-bold text-lg">服飾</span>
+                            <span class="text-gray-400 text-xs">Uniqlo 冬季外套</span>
+                        </div>
+                    </div>
+                    <!-- 金額與日期 -->
+                    <div class="flex flex-col items-end gap-1">
+                        <span class="bg-[#D7CCC8] text-[#3E2723] px-3 py-0.5 rounded-full font-bold text-sm min-w-[80px] text-center">
+                            - $3,400
+                        </span>
+                        <span class="text-gray-400 text-xs tracking-wider">2026/01/03</span>
+                    </div>
+                </div>
+
+                <!-- 範例 2: 娛樂 -->
+                <div class="flex items-center justify-between group cursor-pointer">
+                    <div class="flex items-center gap-4">
+                        <div class="w-12 h-12 bg-[#8D6E63] rounded-xl flex items-center justify-center text-white shadow-sm group-hover:scale-105 transition-transform">
+                            <i class="fa-solid fa-gamepad text-xl"></i>
+                        </div>
+                        <div class="flex flex-col">
+                            <span class="text-primary-dark font-bold text-lg">娛樂</span>
+                            <span class="text-gray-400 text-xs">Steam 冬季特賣</span>
+                        </div>
+                    </div>
+                    <div class="flex flex-col items-end gap-1">
+                        <span class="bg-[#D7CCC8] text-[#3E2723] px-3 py-0.5 rounded-full font-bold text-sm min-w-[80px] text-center">
+                            - $6,000
+                        </span>
+                        <span class="text-gray-400 text-xs tracking-wider">2026/01/02</span>
+                    </div>
+                </div>
+
+                 <!-- 範例 3: 水電費 -->
+                 <div class="flex items-center justify-between group cursor-pointer">
+                    <div class="flex items-center gap-4">
+                        <div class="w-12 h-12 bg-[#8D6E63] rounded-xl flex items-center justify-center text-white shadow-sm group-hover:scale-105 transition-transform">
+                            <i class="fa-solid fa-bolt text-xl"></i>
+                        </div>
+                        <div class="flex flex-col">
+                            <span class="text-primary-dark font-bold text-lg">水電費</span>
+                            <span class="text-gray-400 text-xs">12月份電費帳單</span>
+                        </div>
+                    </div>
+                    <div class="flex flex-col items-end gap-1">
+                        <span class="bg-[#D7CCC8] text-[#3E2723] px-3 py-0.5 rounded-full font-bold text-sm min-w-[80px] text-center">
+                            - $1,200
+                        </span>
+                        <span class="text-gray-400 text-xs tracking-wider">2026/01/01</span>
+                    </div>
+                </div>
+
+                 <!-- 範例 4: 薪資收入 (展示不同顏色的金額) -->
+                 <div class="flex items-center justify-between group cursor-pointer">
+                    <div class="flex items-center gap-4">
+                        <div class="w-12 h-12 bg-[#5D4037] rounded-xl flex items-center justify-center text-white shadow-sm group-hover:scale-105 transition-transform">
+                            <i class="fa-solid fa-wallet text-xl"></i>
+                        </div>
+                        <div class="flex flex-col">
+                            <span class="text-primary-dark font-bold text-lg">薪資</span>
+                            <span class="text-gray-400 text-xs">一月份薪水入帳</span>
+                        </div>
+                    </div>
+                    <div class="flex flex-col items-end gap-1">
+                        <!-- 收入用淺綠色背景 -->
+                        <span class="bg-[#C8E6C9] text-[#1B5E20] px-3 py-0.5 rounded-full font-bold text-sm min-w-[80px] text-center">
+                            + $50,000
+                        </span>
+                        <span class="text-gray-400 text-xs tracking-wider">2026/01/01</span>
+                    </div>
+                </div>
+
+                 <!-- 範例 5: 去年紀錄 (模擬捲動) -->
+                 <div class="flex items-center justify-between group cursor-pointer opacity-60">
+                    <div class="flex items-center gap-4">
+                        <div class="w-12 h-12 bg-gray-400 rounded-xl flex items-center justify-center text-white shadow-sm">
+                            <i class="fa-solid fa-utensils text-xl"></i>
+                        </div>
+                        <div class="flex flex-col">
+                            <span class="text-primary-dark font-bold text-lg">晚餐</span>
+                            <span class="text-gray-400 text-xs">跨年聚餐</span>
+                        </div>
+                    </div>
+                    <div class="flex flex-col items-end gap-1">
+                        <span class="bg-gray-200 text-gray-600 px-3 py-0.5 rounded-full font-bold text-sm min-w-[80px] text-center">
+                            - $1,500
+                        </span>
+                        <span class="text-gray-400 text-xs tracking-wider">2025/12/31</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 底部統計欄 (固定在卡片底部) -->
+            <div class="absolute bottom-0 left-0 w-full bg-white/95 backdrop-blur shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] border-t border-gray-100 pb-8 pt-4 px-8">
+                <div class="flex justify-between items-center">
+                    <!-- 支出 -->
+                    <div class="flex flex-col">
+                        <span class="text-xs text-gray-500 font-medium mb-1">本月支出總計</span>
+                        <span class="text-2xl font-bold text-[#D32F2F] tracking-tight">
+                            $ <span id="total-expense">10,600</span>
+                        </span>
                     </div>
                     
-                    <div id="user-status" class="hidden flex items-center gap-2">
-                        <span class="text-xs opacity-90">Hi, <span id="display-username" class="font-bold"></span></span>
-                        <button onclick="handleLogout()" class="text-[10px] bg-red-500/80 hover:bg-red-600 px-2 py-1 rounded transition">
-                            登出
-                        </button>
+                    <!-- 分隔線 -->
+                    <div class="w-[1px] h-10 bg-gray-300"></div>
+
+                    <!-- 收入 -->
+                    <div class="flex flex-col items-end">
+                        <span class="text-xs text-gray-500 font-medium mb-1">本月收入總計</span>
+                        <span class="text-2xl font-bold text-[#388E3C] tracking-tight">
+                            $ <span id="total-income">50,000</span>
+                        </span>
                     </div>
                 </div>
             </div>
 
-            <div class="flex justify-between items-start mb-3">
-                <div>
-                   <h1 id="header-clock" class="text-xs md:text-sm opacity-80 font-medium font-mono">載入中...</h1>
-                    <div class="flex items-baseline gap-2">
-                        <div id="header-date" class="text-xl md:text-2xl font-bold tracking-wide">載入中...</div>
-                        <div id="header-holiday" class="text-xs bg-red-500 text-white px-2 py-0.5 rounded-full hidden"></div>
-                    </div>
-                </div>
-                <div class="bg-indigo-500/50 rounded-lg p-2 px-3 text-center backdrop-blur-sm min-w-[70px]">
-                    <div class="text-[10px] md:text-xs opacity-80">持有金幣</div>
-                    <div class="text-lg md:text-xl font-bold text-yellow-300">
-                        $<span id="current-balance">0</span>
-                    </div>
-                </div>
-            </div>
+            <!-- 浮動新增按鈕 (FAB) - 額外加上去的，覺得這類 APP 都需要 -->
+            <button onclick="showToast()" class="absolute bottom-28 right-6 w-14 h-14 bg-[#4E342E] rounded-full text-white shadow-lg flex items-center justify-center hover:scale-110 active:scale-95 transition-all z-20">
+                <i class="fa-solid fa-plus text-2xl"></i>
+            </button>
 
-            <div class="flex gap-2 mt-1">
-                <button onclick="clickDailyTab()" id="tab-daily" class="tab-btn active pb-2 flex-1 text-center text-sm">今日計畫</button>
-                <button onclick="switchTab('monthly')" id="tab-monthly" class="tab-btn pb-2 flex-1 text-center text-sm">我的日曆</button>
-                <button onclick="switchTab('shop')" id="tab-shop" class="tab-btn pb-2 flex-1 text-center text-sm">兌換商店</button>
-            </div>
-        </div>
-
-        <div class="flex-1 overflow-hidden relative bg-gray-50">
-            <div id="view-list" class="view-container absolute inset-0 flex flex-col bg-gray-50 z-10">
-                <div id="holiday-alert-banner" class="hidden bg-red-100 text-red-600 px-4 py-2 text-sm font-bold text-center flex items-center justify-center gap-2 shrink-0 border-b border-red-200">
-                    <i class="fas fa-gift"></i> <span id="holiday-name"></span>
-                </div>
-                <div id="selected-date-banner" class="hidden bg-yellow-100 text-yellow-800 text-center py-1 text-sm font-medium flex justify-between px-4 items-center shrink-0">
-                    <span class="truncate text-xs"><i class="fas fa-calendar-alt mr-1"></i> <span id="editing-date-display"></span></span>
-                    <button onclick="backToToday()" class="text-indigo-600 hover:text-indigo-800 underline text-xs whitespace-nowrap ml-2">回到今日</button>
-                </div>
-                <div class="p-3 md:p-4 bg-white border-b border-gray-100 shadow-sm z-10 shrink-0">
-                    <div class="flex gap-2 mb-2">
-                        <input type="text" id="task-input" class="flex-[2] bg-gray-50 border border-gray-200 text-gray-900 rounded-lg md:rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none p-2 md:p-3 text-sm md:text-base" placeholder="計畫要做什麼？">
-                        <input type="number" id="reward-input" class="w-20 md:flex-[1] bg-gray-50 border border-gray-200 text-gray-900 rounded-lg md:rounded-xl focus:ring-2 focus:ring-yellow-400 outline-none p-2 md:p-3 text-center text-sm md:text-base" placeholder="$">
-                    </div>
-                    <button onclick="addTask()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg md:rounded-xl py-2 md:py-3 shadow-lg active:scale-[0.98] transition flex items-center justify-center gap-2 text-sm md:text-base">
-                        <i class="fas fa-plus-circle"></i> 加入計畫
-                    </button>
-                </div>
-                <div class="flex-1 overflow-y-auto p-3 md:p-4 space-y-3 no-scrollbar" id="task-list"></div>
-                <div id="empty-state" class="hidden absolute inset-0 top-32 flex-col items-center justify-center text-gray-400 pointer-events-none">
-                    <i class="fas fa-mug-hot text-5xl mb-3 text-indigo-100"></i>
-                    <p class="text-sm">本日尚無計畫</p>
-                </div>
-            </div>
-
-            <div id="view-calendar" class="view-container absolute inset-0 flex flex-col bg-white transform translate-x-full overflow-y-auto z-20">
-                <div class="flex justify-between items-center p-4 shrink-0">
-                    <button onclick="changeMonth(-1)" class="w-8 h-8 rounded-full hover:bg-gray-100 text-gray-600"><i class="fas fa-chevron-left"></i></button>
-                    <h2 id="calendar-month-year" class="text-lg font-bold text-gray-800"></h2>
-                    <button onclick="changeMonth(1)" class="w-8 h-8 rounded-full hover:bg-gray-100 text-gray-600"><i class="fas fa-chevron-right"></i></button>
-                </div>
-                <div class="grid grid-cols-7 text-center text-xs text-gray-400 font-medium mb-2 px-2 shrink-0">
-                    <div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div>
-                </div>
-                <div id="calendar-grid" class="grid grid-cols-7 gap-1 px-2 pb-4 shrink-0"></div>
-                <div class="flex-1 bg-gray-50 border-t border-gray-100 p-4 overflow-y-auto">
-                    <div class="flex justify-between items-center mb-2">
-                        <h3 class="text-sm font-bold text-gray-500"><span id="preview-date-label">選擇日期</span></h3>
-                        <button onclick="editSelectedDate()" id="btn-edit-date" class="hidden text-xs bg-indigo-100 text-indigo-700 px-3 py-1 rounded-full hover:bg-indigo-200 whitespace-nowrap">去編輯 <i class="fas fa-arrow-right ml-1"></i></button>
-                    </div>
-                    <div id="calendar-holiday-info" class="hidden mb-2 text-xs text-red-500 font-bold bg-red-50 p-2 rounded-lg"><i class="fas fa-star mr-1"></i> <span id="calendar-holiday-name"></span></div>
-                    <ul id="calendar-preview-list" class="space-y-2 text-sm text-gray-600"></ul>
-                </div>
-            </div>
-
-            <div id="view-shop" class="view-container absolute inset-0 flex flex-col bg-gray-50 transform translate-x-full z-20 overflow-hidden">
-                <div class="p-3 md:p-4 bg-white border-b border-gray-100 shadow-sm z-10 shrink-0">
-                    <h2 id="shop-stats-header" class="text-sm font-bold text-gray-500 mb-2 flex justify-between items-center">
-                        <span>已達成計畫數量</span>
-                        <span id="completed-count-display" class="text-indigo-600 text-lg">0</span>
-                    </h2>
-                    <div class="flex gap-2 mb-2">
-                        <input type="text" id="shop-item-input" class="flex-[2] bg-gray-50 border border-gray-200 text-gray-900 rounded-lg md:rounded-xl focus:ring-2 focus:ring-purple-500 outline-none p-2 md:p-3 text-sm md:text-base" placeholder="來去買淘寶">
-                        <input type="number" id="shop-cost-input" class="w-20 md:flex-[1] bg-gray-50 border border-gray-200 text-gray-900 rounded-lg md:rounded-xl focus:ring-2 focus:ring-purple-500 outline-none p-2 md:p-3 text-center text-sm md:text-base" placeholder="$">
-                    </div>
-                    <button onclick="addShopItem()" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-lg md:rounded-xl py-2 shadow-lg active:scale-[0.98] transition flex items-center justify-center gap-2 text-sm md:text-base"><i class="fas fa-plus"></i> 新增獎勵</button>
-                </div>
-                <div class="flex-1 overflow-y-auto p-3 md:p-4 space-y-3 no-scrollbar">
-                    <div id="shop-list" class="grid grid-cols-1 gap-3"></div>
-                    <div class="mt-6 mb-4">
-                        <h3 class="text-sm font-bold text-gray-400 mb-2 px-1">兌換紀錄 (最近 5 筆)</h3>
-                        <ul id="redemption-history" class="space-y-2 text-sm text-gray-500 px-1"></ul>
-                    </div>
-                </div>
-            </div>
-
-        </div>
+        </main>
     </div>
 
-    <div id="login-modal" class="hidden fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-scaleIn">
-            <div class="bg-indigo-600 p-4 text-white text-center relative">
-                <h3 class="text-lg font-bold">雲端同步</h3>
-                <p class="text-xs opacity-80 mt-1">跨裝置存取您的計畫表</p>
-                <button onclick="closeLoginModal()" class="absolute top-4 right-4 text-white/70 hover:text-white">
-                    <i class="fas fa-times"></i>
-                </button>
-            </div>
-            <div class="p-6 space-y-4">
-                <div>
-                    <label class="block text-xs font-bold text-gray-500 mb-1">帳號</label>
-                    <input type="text" id="login-user" class="w-full bg-gray-50 border border-gray-300 rounded-lg p-3 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 transition" placeholder="輸入您的帳號">
-                </div>
-                <div>
-                    <label class="block text-xs font-bold text-gray-500 mb-1">密碼</label>
-                    <input type="password" id="login-pass" class="w-full bg-gray-50 border border-gray-300 rounded-lg p-3 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 transition" placeholder="輸入您的密碼">
-                </div>
-                
-                <div class="flex flex-col gap-3 mt-4">
-                    <button onclick="handleLoginAction()" id="btn-login-action" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl shadow-lg active:scale-95 transition">
-                        登入
-                    </button>
-                    <div class="relative flex py-1 items-center">
-                        <div class="flex-grow border-t border-gray-200"></div>
-                        <span class="flex-shrink-0 mx-4 text-gray-400 text-xs">或</span>
-                        <div class="flex-grow border-t border-gray-200"></div>
-                    </div>
-                    <button onclick="handleRegisterAction()" id="btn-register-action" class="w-full bg-white border-2 border-indigo-100 hover:bg-indigo-50 text-indigo-600 font-bold py-2 rounded-xl active:scale-95 transition">
-                        註冊新帳號
-                    </button>
-                </div>
-                <div class="text-[10px] text-center text-gray-400">
-                    註冊後，目前的本地資料將會上傳至雲端。
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div id="edit-modal" class="hidden fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-scaleIn">
-            <div class="bg-indigo-600 p-4 text-white flex justify-between items-center">
-                <h3 class="text-lg font-bold"><i class="fas fa-edit"></i> 修改計畫</h3>
-                <button onclick="closeEditModal()" class="text-white/70 hover:text-white">
-                    <i class="fas fa-times"></i>
-                </button>
-            </div>
-            <div class="p-6 space-y-4">
-                <input type="hidden" id="edit-task-id">
-                <div>
-                    <label class="block text-xs font-bold text-gray-500 mb-1">計畫內容</label>
-                    <input type="text" id="edit-task-text" class="w-full bg-gray-50 border border-gray-300 rounded-lg p-3 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 transition">
-                </div>
-                <div>
-                    <label class="block text-xs font-bold text-gray-500 mb-1">獎勵金額 ($)</label>
-                    <input type="number" id="edit-task-reward" class="w-full bg-gray-50 border border-gray-300 rounded-lg p-3 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 transition">
-                </div>
-                
-                <div class="flex gap-3 mt-4">
-                    <button onclick="closeEditModal()" class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-600 font-bold py-3 rounded-xl transition">
-                        取消
-                    </button>
-                    <button onclick="saveEditTask()" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl shadow-lg active:scale-95 transition">
-                        儲存修改
-                    </button>
-                </div>
-            </div>
-        </div>
+    <!-- 簡單的通知提示 (Toast) -->
+    <div id="toast" class="fixed top-10 left-1/2 -translate-x-1/2 bg-gray-800 text-white px-4 py-2 rounded-lg text-sm opacity-0 transition-opacity duration-300 pointer-events-none z-50">
+        功能開發中...
     </div>
 
     <script>
-        // --- 設定與狀態 ---
-        window.tasks = JSON.parse(localStorage.getItem('myDailyPlans_v2')) || [];
-        window.shopItems = JSON.parse(localStorage.getItem('myShopItems')) || [{ id: 1, text: '買一件衣服', cost: 50 }];
-        window.redemptions = JSON.parse(localStorage.getItem('myRedemptions')) || [];
-
-        // 資料匯入
-        window.importCloudData = function(data) {
-            if(data.tasks) window.tasks = data.tasks;
-            if(data.shopItems) window.shopItems = data.shopItems;
-            if(data.redemptions) window.redemptions = data.redemptions;
-            saveData(false);
-            updateHeader();
-            if (currentView === 'daily') renderTaskList();
-            if (currentView === 'monthly') renderCalendar();
-            if (currentView === 'shop') renderShop();
-        }
-
-        // 初始化舊資料
-        if (!Array.isArray(window.tasks) || (window.tasks.length > 0 && !window.tasks[0].date)) {
-            const oldTasks = JSON.parse(localStorage.getItem('myDailyPlans')) || [];
-            if(oldTasks.length > 0) {
-                const today = getTaipeiDateString();
-                window.tasks = oldTasks.map(t => ({
-                    id: Date.now() + Math.random(),
-                    text: t.text, reward: 0, completed: t.completed, date: today 
-                }));
-                localStorage.setItem('myDailyPlans_v2', JSON.stringify(window.tasks));
-            }
-        }
-
-        let currentView = 'daily'; 
-        let selectedDate = getTaipeiDateString(); 
-        let calendarYear = new Date().getFullYear();
-        let calendarMonth = new Date().getMonth(); 
-
-        const holidays = {
-            '01-01': '元旦', '02-28': '和平紀念日', '04-04': '兒童節', '04-05': '清明節', '05-01': '勞動節',
-            '08-08': '父親節', '10-10': '國慶日', '10-31': '萬聖節', '12-25': '聖誕節', '12-31': '跨年',
-            '2025-01-25': '春節連假', '2025-01-26': '春節連假', '2025-01-27': '小年夜', '2025-01-28': '除夕', '2025-01-29': '春節 (初一)', '2025-01-30': '初二', '2025-01-31': '初三', '2025-02-01': '初四', '2025-02-02': '初五',
-            '2025-02-28': '和平紀念日', '2025-03-01': '228連假', '2025-03-02': '228連假', '2025-04-03': '兒童節(補假)', '2025-04-04': '清明節', '2025-04-05': '清明連假', '2025-04-06': '清明連假',
-            '2025-05-11': '母親節', '2025-05-30': '端午節(補假)', '2025-05-31': '端午節', '2025-06-01': '端午連假', '2025-10-04': '中秋連假', '2025-10-05': '中秋連假', '2025-10-06': '中秋節', '2025-10-10': '國慶日', '2025-10-11': '國慶連假', '2025-10-12': '國慶連假',
-            '2026-01-01': '元旦', '2026-02-14': '春節連假', '2026-02-15': '春節連假', '2026-02-16': '除夕', '2026-02-17': '春節 (初一)', '2026-02-18': '初二', '2026-02-19': '初三', '2026-02-20': '春節連假', '2026-02-21': '春節連假', '2026-02-22': '春節連假',
-            '2026-02-27': '228連假', '2026-02-28': '和平紀念日', '2026-03-01': '228連假', '2026-04-03': '兒童節', '2026-04-04': '清明節', '2026-04-05': '清明連假', '2026-04-06': '清明連假',
-            '2026-05-01': '勞動節', '2026-05-02': '勞動節連假', '2026-05-03': '勞動節連假', '2026-06-19': '端午連假', '2026-06-20': '端午節', '2026-06-21': '端午連假', '2026-09-25': '中秋節', '2026-09-26': '中秋連假', '2026-09-27': '中秋連假', '2026-09-28': '中秋連假',
-            '2026-10-09': '國慶連假', '2026-10-10': '國慶日', '2026-10-11': '國慶連假', '2026-10-24': '光復節連假', '2026-10-25': '臺灣光復節', '2026-10-26': '光復節補假', '2026-12-25': '行憲紀念日', '2026-12-26': '行憲紀念日連假', '2026-12-27': '行憲紀念日連假'
-        };
-
-        function getHolidayName(dateStr) {
-            if (holidays[dateStr]) return holidays[dateStr];
-            const [y, m, d] = dateStr.split('-');
-            const shortDate = `${m}-${d}`;
-            if (holidays[shortDate]) return holidays[shortDate];
-            return null;
-        }
-
-        // 核心工具
-        function getTaipeiDateObject() {
-            const now = new Date();
-            return new Date(now.toLocaleString("en-US", {timeZone: "Asia/Taipei"}));
-        }
-
-        function getTaipeiDateString(dateObj = null) {
-            const d = dateObj || getTaipeiDateObject();
-            const year = d.getFullYear();
-            const month = String(d.getMonth() + 1).padStart(2, '0');
-            const day = String(d.getDate()).padStart(2, '0');
-            return `${year}-${month}-${day}`;
-        }
-
-        function formatDateDisplay(dateStr) {
-            const [y, m, d] = dateStr.split('-');
-            return `${m}月${d}日`;
-        }
-
-        function escapeHtml(text) {
-            return text.replace(/[&<>"']/g, function(m) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]; });
-        }
-
-        // 金幣與 Header
-        function calculateBalance() {
-            const totalEarned = window.tasks.filter(t => t.completed).reduce((sum, t) => sum + (parseInt(t.reward) || 0), 0);
-            const totalSpent = window.redemptions.reduce((sum, r) => sum + (parseInt(r.cost) || 0), 0);
-            return totalEarned - totalSpent;
-        }
-
-        function updateHeader() {
-            const taipeiNow = getTaipeiDateObject();
-            const todayStr = getTaipeiDateString(taipeiNow);
-            document.getElementById('header-date').textContent = new Intl.DateTimeFormat('zh-TW', { month: 'long', day: 'numeric', weekday: 'long' }).format(taipeiNow);
-            
-            const todayHoliday = getHolidayName(todayStr);
-            const headerHolidayEl = document.getElementById('header-holiday');
-            if (todayHoliday) {
-                headerHolidayEl.textContent = todayHoliday;
-                headerHolidayEl.classList.remove('hidden');
-            } else {
-                headerHolidayEl.classList.add('hidden');
-            }
-
-            const balance = calculateBalance();
-            const balanceEl = document.getElementById('current-balance');
-            balanceEl.textContent = balance;
-            balanceEl.parentElement.classList.remove('text-yellow-300');
-            void balanceEl.offsetWidth; 
-            balanceEl.parentElement.classList.add('text-yellow-300');
-        }
-
-        // 儲存核心
-        function saveData(syncToCloud = true) {
-            localStorage.setItem('myDailyPlans_v2', JSON.stringify(window.tasks));
-            localStorage.setItem('myShopItems', JSON.stringify(window.shopItems));
-            localStorage.setItem('myRedemptions', JSON.stringify(window.redemptions));
-            
-            updateHeader();
-            if (currentView === 'daily') renderTaskList();
-            if (currentView === 'monthly') renderCalendar();
-            if (currentView === 'shop') renderShop();
-
-            if (syncToCloud && window.CloudManager && window.CloudManager.isLoggedIn) {
-                window.CloudManager.save();
-            }
-        }
-
-        // List View
-        function renderTaskList() {
-            const listEl = document.getElementById('task-list');
-            const emptyState = document.getElementById('empty-state');
-            const todayStr = getTaipeiDateString();
-            
-            const banner = document.getElementById('selected-date-banner');
-            const editDateDisplay = document.getElementById('editing-date-display');
-            
-            if (selectedDate !== todayStr) {
-                banner.classList.remove('hidden');
-                editDateDisplay.textContent = formatDateDisplay(selectedDate);
-            } else {
-                banner.classList.add('hidden');
-            }
-
-            const holidayName = getHolidayName(selectedDate);
-            const holidayBanner = document.getElementById('holiday-alert-banner');
-            const holidayNameSpan = document.getElementById('holiday-name');
-            
-            if (holidayName) {
-                holidayBanner.classList.remove('hidden');
-                let displayText = ` ${formatDateDisplay(selectedDate)} 是 ${holidayName}`;
-                if (holidayName.includes('聖誕')) displayText = '🎄 ' + displayText;
-                else if (holidayName.includes('年') || holidayName.includes('春節')) displayText = '🧧 ' + displayText;
-                else if (holidayName.includes('端午')) displayText = '🛶 ' + displayText;
-                else if (holidayName.includes('中秋')) displayText = '🥮 ' + displayText;
-                else if (holidayName.includes('國慶') || holidayName.includes('光復')) displayText = '🇹🇼 ' + displayText;
-                else if (holidayName.includes('母') || holidayName.includes('父')) displayText = '❤️ ' + displayText;
-                else if (holidayName.includes('行憲')) displayText = '📜 ' + displayText;
-                holidayNameSpan.textContent = displayText;
-            } else {
-                holidayBanner.classList.add('hidden');
-            }
-
-            const currentTasks = window.tasks.filter(t => t.date === selectedDate);
-            listEl.innerHTML = '';
-            
-            if (currentTasks.length === 0) {
-                emptyState.classList.remove('hidden');
-                emptyState.classList.add('flex');
-            } else {
-                emptyState.classList.add('hidden');
-                emptyState.classList.remove('flex');
-                currentTasks.forEach(task => {
-                    const li = document.createElement('div');
-                    li.className = `bg-white p-3 rounded-lg md:rounded-xl shadow-sm border border-gray-100 flex items-center gap-2 md:gap-3 transition-all hover:shadow-md ${task.completed ? 'bg-gray-50' : ''}`;
-                    li.innerHTML = `
-                        <input type="checkbox" class="task-checkbox w-5 h-5 md:w-6 md:h-6 text-indigo-600 rounded-md md:rounded-lg border-gray-300 focus:ring-indigo-500 cursor-pointer accent-indigo-600 shrink-0" ${task.completed ? 'checked' : ''} onchange="toggleTask(${task.id})">
-                        <div class="flex-1 min-w-0 transition-opacity ${task.completed ? 'opacity-50' : ''}">
-                            <div class="text-gray-800 font-medium truncate text-sm md:text-base">${escapeHtml(task.text)}</div>
-                            ${task.reward > 0 ? `<div class="text-xs text-yellow-600 font-bold mt-0.5"><i class="fas fa-coins"></i> 獎勵 $${task.reward}</div>` : ''}
-                        </div>
-                        
-                        <button onclick="openEditModal(${task.id})" class="w-8 h-8 flex items-center justify-center text-gray-300 hover:text-indigo-500 transition rounded-full hover:bg-indigo-50 shrink-0">
-                            <i class="fas fa-pen"></i>
-                        </button>
-                        
-                        <button onclick="deleteTask(${task.id})" class="w-8 h-8 flex items-center justify-center text-gray-300 hover:text-red-500 transition rounded-full hover:bg-red-50 shrink-0"><i class="fas fa-trash-alt"></i></button>
-                    `;
-                    listEl.appendChild(li);
-                });
-            }
-        }
-
-        function addTask() {
-            const input = document.getElementById('task-input');
-            const rewardInput = document.getElementById('reward-input');
-            const text = input.value.trim();
-            const reward = parseInt(rewardInput.value) || 0;
-            if (text) {
-                window.tasks.push({ id: Date.now(), text: text, reward: reward, completed: false, date: selectedDate });
-                input.value = ''; rewardInput.value = ''; saveData(); input.focus();
-            }
-        }
-
-        function toggleTask(id) {
-            const task = window.tasks.find(t => t.id === id);
-            if (task) { task.completed = !task.completed; saveData(); }
-        }
-
-        function deleteTask(id) {
-            if(confirm('確定要刪除嗎？')) { window.tasks = window.tasks.filter(t => t.id !== id); saveData(); }
-        }
-
-        // Calendar View
-        function renderCalendar() {
-            const grid = document.getElementById('calendar-grid');
-            const monthYearTitle = document.getElementById('calendar-month-year');
-            grid.innerHTML = '';
-            
-            const dt = new Date(calendarYear, calendarMonth, 1);
-            monthYearTitle.textContent = `${calendarYear}年 ${calendarMonth + 1}月`;
-            
-            const firstDayIndex = dt.getDay(); 
-            const daysInMonth = new Date(calendarYear, calendarMonth + 1, 0).getDate();
-            const todayStr = getTaipeiDateString();
-
-            for (let i = 0; i < firstDayIndex; i++) grid.appendChild(document.createElement('div'));
-
-            for (let d = 1; d <= daysInMonth; d++) {
-                const dayStr = `${calendarYear}-${String(calendarMonth+1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-                const cell = document.createElement('div');
-                const hasTask = window.tasks.some(t => t.date === dayStr);
-                const isHoliday = getHolidayName(dayStr) !== null;
-                
-                let classes = 'calendar-day';
-                if (dayStr === todayStr) classes += ' today';
-                if (dayStr === selectedDate) classes += ' active';
-                if (hasTask) classes += ' has-task';
-                if (isHoliday) classes += ' is-holiday'; 
-
-                cell.className = classes;
-                cell.textContent = d;
-                cell.onclick = () => selectDateInCalendar(dayStr);
-                grid.appendChild(cell);
-            }
-            updateCalendarPreview();
-        }
-
-        function changeMonth(offset) {
-            calendarMonth += offset;
-            if (calendarMonth > 11) { calendarMonth = 0; calendarYear++; } 
-            else if (calendarMonth < 0) { calendarMonth = 11; calendarYear--; }
-            renderCalendar();
-        }
-
-        function selectDateInCalendar(dateStr) { selectedDate = dateStr; renderCalendar(); }
-
-        function updateCalendarPreview() {
-            const previewList = document.getElementById('calendar-preview-list');
-            const previewLabel = document.getElementById('preview-date-label');
-            const editBtn = document.getElementById('btn-edit-date');
-            const holidayInfo = document.getElementById('calendar-holiday-info');
-            const holidayNameSpan = document.getElementById('calendar-holiday-name');
-
-            const [y, m, d] = selectedDate.split('-');
-            previewLabel.textContent = `${m}月${d}日 的計畫`;
-            
-            const holidayName = getHolidayName(selectedDate);
-            if (holidayName) { holidayInfo.classList.remove('hidden'); holidayNameSpan.textContent = holidayName; } else { holidayInfo.classList.add('hidden'); }
-
-            const dayTasks = window.tasks.filter(t => t.date === selectedDate);
-            previewList.innerHTML = '';
-            if (dayTasks.length === 0) {
-                previewList.innerHTML = '<li class="text-center py-2 text-gray-400">這天還沒有安排計畫</li>';
-            } else {
-                dayTasks.forEach(t => {
-                    const li = document.createElement('li');
-                    li.className = 'flex items-center gap-2 truncate';
-                    li.innerHTML = `<i class="fas fa-circle text-[6px] ${t.completed ? 'text-gray-300' : 'text-indigo-400'}"></i><span class="${t.completed ? 'line-through text-gray-400' : ''}">${escapeHtml(t.text)}</span>${t.reward > 0 ? `<span class="text-xs text-yellow-600 ml-auto">$${t.reward}</span>` : ''}`;
-                    previewList.appendChild(li);
-                });
-            }
-            editBtn.classList.remove('hidden');
-        }
-
-        function editSelectedDate() { switchTab('daily'); }
-
-        // Shop View
-        function renderShop() {
-            const shopListEl = document.getElementById('shop-list');
-            const historyEl = document.getElementById('redemption-history');
-            const balance = calculateBalance();
-
-            const completedCount = window.tasks.filter(t => t.completed).length;
-            const headerCountDisplay = document.getElementById('completed-count-display');
-            if (headerCountDisplay) {
-                headerCountDisplay.textContent = completedCount;
-            }
-
-            shopListEl.innerHTML = '';
-            if(window.shopItems.length === 0) {
-                shopListEl.innerHTML = '<div class="text-center text-gray-400 py-4">還沒有獎勵商品，新增一個吧！</div>';
-            } else {
-                window.shopItems.forEach(item => {
-                    const canAfford = balance >= item.cost;
-                    const card = document.createElement('div');
-                    card.className = `bg-white p-3 md:p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 ${!canAfford ? 'opacity-70' : ''}`;
-                    card.innerHTML = `
-                        <div class="flex items-center gap-3 w-full sm:w-auto">
-                            <div class="w-10 h-10 rounded-full bg-purple-50 flex items-center justify-center text-purple-500 shrink-0"><i class="fas fa-gift"></i></div>
-                            <div class="min-w-0 flex-1">
-                                <div class="font-medium text-gray-800 truncate text-sm md:text-base">${escapeHtml(item.text)}</div>
-                                <div class="text-xs font-bold ${canAfford ? 'text-yellow-600' : 'text-red-400'}"><i class="fas fa-coins"></i> $${item.cost} ${!canAfford ? `<span class="font-normal text-red-300 ml-1">(差 $${item.cost - balance})</span>` : ''}</div>
-                            </div>
-                        </div>
-                        <div class="flex gap-2 w-full sm:w-auto justify-end border-t pt-2 sm:border-t-0 sm:pt-0 border-gray-100">
-                             <button onclick="redeemItem(${item.id})" ${!canAfford ? 'disabled' : ''} class="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-sm font-bold text-white transition shadow-sm active:scale-95 ${canAfford ? 'bg-gradient-to-r from-yellow-400 to-orange-500 hover:shadow-md cursor-pointer' : 'bg-gray-300 cursor-not-allowed'}">兌換</button>
-                            <button onclick="deleteShopItem(${item.id})" class="text-gray-300 hover:text-red-400 px-2"><i class="fas fa-trash-alt text-sm"></i></button>
-                        </div>
-                    `;
-                    shopListEl.appendChild(card);
-                });
-            }
-
-            historyEl.innerHTML = '';
-            const recentRedemptions = [...window.redemptions].reverse().slice(0, 5);
-            if(recentRedemptions.length === 0) {
-                historyEl.innerHTML = '<li class="text-center py-2 text-gray-300 text-xs">尚無兌換紀錄</li>';
-            } else {
-                recentRedemptions.forEach(r => {
-                    const li = document.createElement('li');
-                    li.className = 'flex justify-between items-center border-b border-gray-100 pb-1 last:border-0';
-                    li.innerHTML = `<span class="truncate pr-2">${escapeHtml(r.text)}</span><span class="text-xs text-gray-400 whitespace-nowrap">-${r.cost} <i class="fas fa-coins text-[10px]"></i></span>`;
-                    historyEl.appendChild(li);
-                });
-            }
-        }
-
-        // 把這些函式移到 renderShop 外面，變成全域函式，這樣 HTML onclick 才能呼叫到
-        function addShopItem() {
-            const input = document.getElementById('shop-item-input');
-            const costInput = document.getElementById('shop-cost-input');
-            const text = input.value.trim();
-            const cost = parseInt(costInput.value);
-            if (text && cost > 0) {
-                window.shopItems.push({ id: Date.now(), text: text, cost: cost });
-                input.value = ''; costInput.value = ''; saveData();
-            } else { alert('請輸入名稱與正確的金額'); }
-        }
-
-        function deleteShopItem(id) { if(confirm('移除這個獎勵選項？')) { window.shopItems = window.shopItems.filter(item => item.id !== id); saveData(); } }
-
-        function redeemItem(id) {
-            const item = window.shopItems.find(i => i.id === id);
-            const balance = calculateBalance();
-            if (item && balance >= item.cost) {
-                if(confirm(`確定要花費 $${item.cost} 兌換「${item.text}」嗎？`)) {
-                    window.redemptions.push({ id: Date.now(), itemId: item.id, text: item.text, cost: item.cost, date: new Date().toISOString() });
-                    saveData();
-                    alert(`兌換成功！享受你的 ${item.text} 吧！`);
-                }
-            } else { alert('金幣不足！'); }
-        }
-
-        function switchTab(tab) {
-            currentView = tab;
-            const views = { 'daily': document.getElementById('view-list'), 'monthly': document.getElementById('view-calendar'), 'shop': document.getElementById('view-shop') };
-            const tabs = { 'daily': document.getElementById('tab-daily'), 'monthly': document.getElementById('tab-monthly'), 'shop': document.getElementById('tab-shop') };
-
-            Object.values(views).forEach(el => { el.classList.add('translate-x-full'); el.classList.remove('z-30'); });
-            Object.values(tabs).forEach(el => el.classList.remove('active'));
-
-            views[tab].classList.remove('translate-x-full');
-            tabs[tab].classList.add('active');
-
-            if (tab === 'daily') {
-                renderTaskList();
-            } else if (tab === 'monthly') {
-                const [y, m] = selectedDate.split('-');
-                calendarYear = parseInt(y); calendarMonth = parseInt(m) - 1;
-                renderCalendar();
-            } else if (tab === 'shop') { renderShop(); }
-            saveData(); 
-        }
-
-        // 獨立出「點擊每日計畫」的行為
-        function clickDailyTab() {
-            selectedDate = getTaipeiDateString(); 
-            switchTab('daily');
-        }
-
-        function backToToday() { selectedDate = getTaipeiDateString(); renderTaskList(); }
-
-        // --- 新增：編輯功能相關函式 ---
+        // 簡單的 JS 邏輯：處理數字格式化
+        // 這裡只是示範，實際數據通常來自資料庫
         
-        function openEditModal(id) {
-            const task = window.tasks.find(t => t.id === id);
-            if (!task) return;
-
-            // 把資料填入輸入框
-            document.getElementById('edit-task-id').value = task.id;
-            document.getElementById('edit-task-text').value = task.text;
-            document.getElementById('edit-task-reward').value = task.reward;
-
-            // 顯示視窗
-            document.getElementById('edit-modal').classList.remove('hidden');
+        function formatMoney(amount) {
+            return amount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
         }
 
-        function closeEditModal() {
-            document.getElementById('edit-modal').classList.add('hidden');
+        // 點擊新增按鈕的互動
+        function showToast() {
+            const toast = document.getElementById('toast');
+            toast.classList.remove('opacity-0');
+            setTimeout(() => {
+                toast.classList.add('opacity-0');
+            }, 2000);
         }
 
-        function saveEditTask() {
-            const id = parseFloat(document.getElementById('edit-task-id').value);
-            const newText = document.getElementById('edit-task-text').value.trim();
-            const newReward = parseInt(document.getElementById('edit-task-reward').value) || 0;
-
-            if (!newText) {
-                alert('計畫內容不能為空！');
-                return;
-            }
-
-            // 更新陣列中的資料
-            const taskIndex = window.tasks.findIndex(t => t.id === id);
-            if (taskIndex !== -1) {
-                window.tasks[taskIndex].text = newText;
-                window.tasks[taskIndex].reward = newReward;
-                
-                saveData(); // 儲存並同步雲端
-                closeEditModal();
-                alert('修改成功！');
-            } else {
-                alert('找不到該計畫，可能已被刪除。');
-                closeEditModal();
-            }
-        }
-
-        updateHeader();
-        renderTaskList();
-        setInterval(updateHeader, 60000);
-
-// --- 新增：即時時鐘功能 ---
-        function updateRealTimeClock() {
-            const now = new Date();
-            // 取得台北時間
-            const timeStr = now.toLocaleTimeString('zh-TW', {
-                timeZone: 'Asia/Taipei',
-                hour12: false, // 使用 24 小時制 (若要 12 小時制改成 true)
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit'
+        // 這裡可以加入更多邏輯，例如點擊列表項目跳轉到編輯頁面
+        document.querySelectorAll('#transaction-list > div').forEach(item => {
+            item.addEventListener('click', () => {
+                // 模擬點擊回饋
+                item.style.backgroundColor = '#F5F5F5';
+                setTimeout(() => {
+                    item.style.backgroundColor = 'transparent';
+                }, 200);
             });
-            
-            const clockEl = document.getElementById('header-clock');
-            if (clockEl) {
-                clockEl.innerHTML = timeStr;
-            }
-        }
-
-        // 啟動時鐘，每秒更新 (1000 毫秒)
-        setInterval(updateRealTimeClock, 1000);
-        updateRealTimeClock(); // 初始化時馬上執行一次
+        });
     </script>
 </body>
 </html>
